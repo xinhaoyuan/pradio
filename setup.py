@@ -10,7 +10,7 @@ setup(
     author_email = "xinhaoyuan@gmail.com",
     url = "https://github.com/xinhaoyuan/pradio",
     license = "Apache License 2.0",
-    install_requires = [ "urwid", "mplayer.py" ],
+    install_requires = [ "urwid", "mplayer.py", "pykka >= 2.0.0" ],
     long_description = open("README.md").read(),
     long_description_content_type = "text/markdown",
     entry_points={
