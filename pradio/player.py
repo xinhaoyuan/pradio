@@ -109,9 +109,9 @@ class Player:
         Query for the next song, set up mplayer, and generate the title based on the returned data.
         """
         self._last_stopped_time = None
-        self.log("Requesting next song ...")
+        self.log("Requesting the next song ...")
         try:
-            self._proc.stdin.write(json.dumps({ "type" : "cmd_next"}).encode("utf-8"))
+            self._proc.stdin.write(json.dumps({ "type" : "cmd_next" }).encode("utf-8"))
             self._proc.stdin.write(b"\n")
             self._proc.stdin.flush()
             resp = json.loads(self._proc.stdout.readline().decode("utf-8"))

@@ -15,20 +15,23 @@ The piped process should replyed with `type` field either `reply_ok` or `reply_e
 
 ### Commands
 
-- `type = "cmd_next"`
+- `type = "cmd_next", (channel_id = (int))`
 
-  Get the next song from the radio.
-  
-  Reply: `type = "reply_ok"; data = { title = (string), album = (string), singers = [(string)], url = (string) }`
+  Change channel if specified. Get the next song from the radio.
+
+  Reply: `type = "reply_ok", id = (any), data = { (title = (string), album = (string), singers = [(string)]), url = (string) }`
   `data.url` is required. Others are not.
 
-- `type = cmd_rate, rating = (int)`
+- `type = "cmd_rate", id = (any), rating = (int)`
 
-  Rate the current song.
+  Rate the song with the specified internal id.
+  If no id is specified, rate the current song.
   Currently it only matters for the sign of the rating. Positive = like; negative = dislike; 0 = erase rating.
 
   Reply: `type = "reply_ok"`
 
-TODO: list and change channels
+- `type = "cmd_list_channels"`
+
+  Reply: `type = "reply_ok", channels = [{ name = (string), id = (int) }]`
 
 When command replys with `type = "reply_error"`, `message` and `details` fields are optional strings of extra information.
