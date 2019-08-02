@@ -51,6 +51,18 @@ class MplayerActor(pykka.ThreadingActor):
 
         return ret
 
+    pass
+
+def channel_button(c, player):
+    button = urwid.Button(c["name"])
+    urwid.connect_signal(button, "click", lambda x : player.choose_channel(c["name"], c["id"]))
+    return urwid.AttrMap(button, None, focus_map='reversed')
+
+def channel_menu(channels, player):
+    body = [ urwid.Text("Choose channel:"), urwid.Divider() ]
+    body.extend([ channel_button(c, player) for c in channels ])
+    return urwid.ListBox(urwid.SimpleFocusListWalker(body))
+
 class Player:
 
     def __init__(self, args):
@@ -66,18 +78,22 @@ class Player:
         self._progress_widget = urwid.Text("", align = "center")
         self._volume_widget = urwid.Text("", align = "center")
         self._output_widget = urwid.Pile([])
-        self.frame = urwid.Frame(
+        self._output_container = urwid.Filler(self._output_widget, valign = 'top')
+        self._main_placeholder = urwid.WidgetPlaceholder(self._output_container)
+        self._frame = urwid.Frame(
             header= urwid.Pile([
                 self._title_widget,
                 self._progress_widget,
                 self._volume_widget,
                 urwid.Divider("-"),
             ]),
-            body = urwid.Filler(self._output_widget, valign = 'top'),
+            body = self._main_placeholder,
             focus_part = 'header')
         self._current_song_title = None
         self._last_stopped_time = None
         self._loop = None
+        self._channel_id = None
+        self._choosing_channel = False
         self._just_started = True
         pass
 
@@ -111,7 +127,10 @@ class Player:
         self._last_stopped_time = None
         self.log("Requesting the next song ...")
         try:
-            self._proc.stdin.write(json.dumps({ "type" : "cmd_next" }).encode("utf-8"))
+            req = { "type" : "cmd_next" }
+            if self._channel_id is not None:
+                req["channel_id"] = self._channel_id
+            self._proc.stdin.write(json.dumps(req).encode("utf-8"))
             self._proc.stdin.write(b"\n")
             self._proc.stdin.flush()
             resp = json.loads(self._proc.stdout.readline().decode("utf-8"))
@@ -149,6 +168,48 @@ class Player:
         self.update()
         pass
 
+    def toggle_choose_channel(self):
+        if self._choosing_channel:
+            self._main_placeholder.original_widget = self._output_container
+            self._choosing_channel = False
+            return
+
+        channels = None
+        try:
+            req = { "type" : "cmd_list_channels" }
+            self._proc.stdin.write(json.dumps(req).encode("utf-8"))
+            self._proc.stdin.write(b"\n")
+            self._proc.stdin.flush()
+            resp = json.loads(self._proc.stdout.readline().decode("utf-8"))
+            assert(resp["type"] == "reply_ok")
+            assert("channels" in resp)
+
+            channels = resp["channels"]
+        except Exception as e:
+            self.log("Got error playing next song: %s" % str(e))
+            return
+
+        self._choosing_channel = True
+        menu = channel_menu(channels, self)
+        self._main_placeholder.original_widget = urwid.Overlay(
+            menu,
+            self._output_widget,
+            align='center', width=('relative', 80),
+            valign='middle', height=('relative', 80)
+        )
+        self._frame.set_focus("body")
+        pass
+
+    def choose_channel(self, name, channel_id):
+        if not self._choosing_channel:
+            return
+
+        self._channel_id = channel_id
+        self._choosing_channel = False
+        self._main_placeholder.original_widget = self._output_container
+        self.log("Choose channel {}: {}".format(name, channel_id))
+        self.next_song()
+
     def handle_key(self, key):
         if key == " ":
             self.pause()
@@ -162,8 +223,13 @@ class Player:
             self.rate(-1)
             self.next_song()
         elif key == "q":
-            raise urwid.ExitMainLoop()
+            if self._choosing_channel:
+                self.toggle_choose_channel()
+            else:
+                raise urwid.ExitMainLoop()
         elif key == "c":
+            self.toggle_choose_channel()
+        elif key == "/":
             self._output_widget.contents = []
         elif key == "h":            
             help_str = "\n".join([
@@ -176,6 +242,7 @@ class Player:
                 "  [u] for canelling liking the song.",
                 "  [x] for unliking the song and go to next song.",
                 "  [c] for cleaning the logs.",
+                "  [/] for cleaning the logs.",
                 "  [q] for exiting."])
             self.log(help_str)
         elif key == "=" or key == "+":
@@ -232,7 +299,7 @@ class Player:
         pass
 
     def run(self):
-        self._loop = urwid.MainLoop(self.frame, unhandled_input = self.handle_key)
+        self._loop = urwid.MainLoop(self._frame, palette=[('reversed', 'standout', '')], unhandled_input = self.handle_key)
         self._loop.set_alarm_in(self._refresh_interval, self.refresh)
         try:
             self._loop.run()
