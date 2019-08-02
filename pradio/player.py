@@ -94,6 +94,7 @@ class Player:
         self._loop = None
         self._channel_id = None
         self._choosing_channel = False
+        self._try_exiting = False
         self._just_started = True
         pass
 
@@ -135,15 +136,15 @@ class Player:
             self._proc.stdin.flush()
             resp = json.loads(self._proc.stdout.readline().decode("utf-8"))
             assert(resp["type"] == "reply_ok")
-            
+
             data = resp["data"]
             url = data["url"]
-            
+
             self._current_song_title = self._song_format.format(
                 title = data["title"] if "title" in data else "?",
                 album = data["album"] if "album" in data else "?",
                 singers = "/".join(data["singers"]) if "singers" in data else "?")
-                
+
             self._last_log.set_text("Playing: {}".format(self._current_song_title))
             if self._debug:
                 if "raw_data" in resp:
@@ -225,13 +226,16 @@ class Player:
         elif key == "q":
             if self._choosing_channel:
                 self.toggle_choose_channel()
+            elif not self._try_exiting:
+                self._try_exiting = True
+                self.log("Press [q] again to exit.")
             else:
                 raise urwid.ExitMainLoop()
         elif key == "c":
             self.toggle_choose_channel()
         elif key == "/":
             self._output_widget.contents = []
-        elif key == "h":            
+        elif key == "h":
             help_str = "\n".join([
                 "Key help:",
                 "  [space] for pausing/resuming.",
@@ -254,6 +258,9 @@ class Player:
         elif self._debug:
             self.log("Unknown key [{}]".format(key))
             pass
+
+        if key != "q":
+            self._try_exiting = False
         pass
 
     def update(self):
