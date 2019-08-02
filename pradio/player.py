@@ -7,6 +7,7 @@ import pykka
 import sys
 import threading
 import queue
+import logging
 
 # Use separate thread to poll status to avoid delays
 class MplayerPollingThread(threading.Thread):
@@ -167,7 +168,8 @@ class Player:
             assert(resp["type"] == "reply_ok")
             self._last_log.set_text("Rated the current song as %d" % rating)
         except Exception as e:
-            self._last_log.set_text("Got error rating the current song: %s" % str(e))
+            logging.exception("Exception while rating the current song")
+            self._last_log.set_text("Exception while rating the current song: %s" % str(e))
             pass
         pass
 
@@ -205,7 +207,8 @@ class Player:
             self._actor.tell(["play", url])
             self.update()
         except Exception as e:
-            self.log("Got error playing next song: %s" % str(e))
+            logging.exception("Exception while getting the next song")
+            self.log("Exception while getting the next song: %s" % str(e))
             pass
         pass
 
@@ -237,7 +240,8 @@ class Player:
 
             channels = resp["channels"]
         except Exception as e:
-            self.log("Got error playing next song: %s" % str(e))
+            logging.exception("Exception while getting the channel list")
+            self.log("Exception while getting the channel list: %s" % str(e))
             return
 
         self._choosing_channel = True
@@ -364,7 +368,7 @@ class Player:
         try:
             self._loop.run()
         except Exception as e:
-            print(e)
+            logging.exception("Exception in the main loop")
             pass
         self._helper_thread.running = False
         self._helper_thread.join()

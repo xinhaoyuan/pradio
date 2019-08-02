@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name = "pradio",
     description = "An overly simple, easily extensible radio player through process pipes",
-    version = "0.2.0",
+    version = "0.2.1",
     packages = [ "pradio" ],
     include_package_data = True,
     author = "Xinhao Yuan",

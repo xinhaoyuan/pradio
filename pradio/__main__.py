@@ -1,4 +1,5 @@
 import argparse
+import logging
 from .player import Player
 
 def main():
@@ -7,8 +8,13 @@ def main():
     parser.add_argument("--refresh-interval", dest = "refresh_interval", default = 1)
     parser.add_argument("--switch-threshold", dest = "switch_threshold", default = 10)
     parser.add_argument("--debug", dest = "debug", action = "store_true")
+    parser.add_argument("--log")
     parser.add_argument("args", nargs = "+")
     args = parser.parse_args()
+
+    if args.log is not None:
+        logging.basicConfig(level=logging.DEBUG, format='%(relativeCreated)6d %(threadName)s %(message)s', filename = args.log, filemode = "w")
+        pass
     
     Player(args).run()
     pass
