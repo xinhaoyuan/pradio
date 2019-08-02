@@ -291,7 +291,7 @@ class Player:
                 "  [l] for liking the song.",
                 "  [u] for canelling liking the song.",
                 "  [x] for unliking the song and go to next song.",
-                "  [c] for cleaning the logs.",
+                "  [c] for changing the channel.",
                 "  [/] for cleaning the logs.",
                 "  [q] for exiting."])
             self.log(help_str)
