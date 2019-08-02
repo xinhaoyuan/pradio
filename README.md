@@ -11,7 +11,7 @@ Author: Xinhao Yuan <xinhaoyuan@gmail.com>
 ## Protocol
 
 Each command and reply is a JSON object with `type` field.
-The piped process should replyed with `type` field either `reply_ok` or `reply_error`.
+The piped process should reply with `type` field either `reply_ok` or `reply_error`.
 
 ### Commands
 
