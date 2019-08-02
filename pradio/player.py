@@ -35,6 +35,8 @@ class MplayerPollingThread(threading.Thread):
                         self._player.mute = not self._player.mute
                     elif task[0] == "adjust_volume":
                         self._player.volume = min(100, max(0, self._player.volume + task[1]))
+                    elif task[0] == "pause":
+                        self._player.pause()
                     pass
             except queue.Empty:
                 pass
@@ -62,7 +64,7 @@ class MplayerActor(pykka.ThreadingActor):
         self._cache_volume = None
         self._cache_percent = None
         self._thread = None
-        
+
     def on_receive(self, msg):
         ret = None
 
@@ -84,7 +86,9 @@ class MplayerActor(pykka.ThreadingActor):
         elif msg[0] == "toggle_mute":
             self._thread.queue.put(msg)
         elif msg[0] == "adjust_volume":
-            self._thread.queue.put(msg) 
+            self._thread.queue.put(msg)
+        elif msg[0] == "pause":
+            self._thread.queue.put(msg)
         else:
             pass
 
@@ -116,9 +120,9 @@ class Player:
             self._player = mplayer.Player()
         else:
             self._player = mplayer.Player(stderr = open("/dev/null", "w"))
-        self._player_actor = MplayerActor.start(args)
-        self._helper_thread = MplayerPollingThread(args, self._player_actor, self._player)
-        self._player_actor.ask([ "set_thread", self._helper_thread ]) 
+        self._actor = MplayerActor.start(args)
+        self._helper_thread = MplayerPollingThread(args, self._actor, self._player)
+        self._actor.ask([ "set_thread", self._helper_thread ])
         self._helper_thread.start()
         self._title_widget = urwid.Text("", align = "center")
         self._progress_widget = urwid.Text("", align = "center")
@@ -198,7 +202,7 @@ class Player:
                 self.log(json.dumps(data))
                 self.log(url)
 
-            self._player_actor.tell(["play", url])
+            self._actor.tell(["play", url])
             self.update()
         except Exception as e:
             self.log("Got error playing next song: %s" % str(e))
@@ -206,12 +210,12 @@ class Player:
         pass
 
     def toggle_mute(self):
-        self._player_actor.tell(["toggle_mute"])
+        self._actor.tell(["toggle_mute"])
         self.update()
         pass
 
     def adjust_volume(self, delta):
-        self._player_actor.tell(["adjust_volume", delta])
+        self._actor.tell(["adjust_volume", delta])
         self.update()
         pass
 
@@ -246,6 +250,9 @@ class Player:
         )
         self._frame.set_focus("body")
         pass
+
+    def pause(self):
+        self._actor.tell(["pause"])
 
     def choose_channel(self, name, channel_id):
         if not self._choosing_channel:
@@ -310,7 +317,7 @@ class Player:
         pass
 
     def update(self):
-        data = self._player_actor.ask(["get_status"])
+        data = self._actor.ask(["get_status"])
         pos = data[0]
         length = data[1]
         vol = data[2]
@@ -361,5 +368,5 @@ class Player:
             pass
         self._helper_thread.running = False
         self._helper_thread.join()
-        self._player_actor.stop()
+        self._actor.stop()
         self._proc.kill()
