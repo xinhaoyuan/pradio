@@ -5,34 +5,55 @@ import time
 import urwid
 import pykka
 import sys
+import threading
+
+# Use separate thread to poll status to avoid delays
+class MplayerPollingThread(threading.Thread):
+
+    def __init__(self, args, mplayer_actor, player):
+        super(MplayerPollingThread, self).__init__()
+        self._mplayer_actor = mplayer_actor
+        self._player = player
+        self._refresh_interval = args.refresh_interval
+        self.running = True
+        pass
+
+    def run(self):
+        while self.running:
+            now = time.time()
+            self._mplayer_actor.tell(
+                [ "update",
+                  self._player.time_pos,
+                  self._player.length,
+                  self._player.percent_pos,
+                  self._player.volume
+                ])
+            time.sleep(max(0, now + self._refresh_interval - time.time()))
+            pass
+        pass
+
+    pass
 
 class MplayerActor(pykka.ThreadingActor):
 
-    def __init__(self, args):
+    def __init__(self, args, player):
         super(MplayerActor, self).__init__()
         self._debug = args.debug
         self._refresh_interval = args.refresh_interval
-        self._last_refresh = time.time()
         self._cache_timepos = None
         self._cache_length = None
         self._cache_volume = None
         self._cache_percent = None
-        if self._debug:
-            self._player = mplayer.Player()
-        else:
-            self._player = mplayer.Player(stderr = open("/dev/null", "w"))
+        self._player = player
 
     def on_receive(self, msg):
         ret = None
-        now = time.time()
-        if now - self._last_refresh > self._refresh_interval:
-            self._last_refresh = now
-            self._cache_timepos = self._player.time_pos
-            self._cache_length = self._player.length
-            self._cache_volume = self._player.volume
-            self._cache_percent = self._player.percent_pos
-            pass
 
+        if msg[0] == "update":
+            self._cache_timepos = msg[1]
+            self._cache_length = msg[2]
+            self._cache_percent = msg[3]
+            self._cache_volume = msg[4]
         if msg[0] == "play":
             self._cache_timepos = None
             self._cache_length = None
@@ -73,7 +94,13 @@ class Player:
                                 stdin = subprocess.PIPE,
                                 stdout = subprocess.PIPE)
         self._debug = args.debug
-        self._player_actor = MplayerActor.start(args)
+        if args.debug:
+            self._player = mplayer.Player()
+        else:
+            self._player = mplayer.Player(stderr = open("/dev/null", "w"))
+        self._player_actor = MplayerActor.start(args, self._player)
+        self._helper_thread = MplayerPollingThread(args, self._player_actor, self._player)
+        self._helper_thread.start()
         self._title_widget = urwid.Text("", align = "center")
         self._progress_widget = urwid.Text("", align = "center")
         self._volume_widget = urwid.Text("", align = "center")
@@ -313,5 +340,7 @@ class Player:
         except Exception as e:
             print(e)
             pass
+        self._helper_thread.running = False
+        self._helper_thread.join()
         self._player_actor.stop()
         self._proc.kill()
