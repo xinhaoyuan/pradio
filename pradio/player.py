@@ -6,6 +6,7 @@ import urwid
 import pykka
 import sys
 import threading
+import queue
 
 # Use separate thread to poll status to avoid delays
 class MplayerPollingThread(threading.Thread):
@@ -15,11 +16,28 @@ class MplayerPollingThread(threading.Thread):
         self._mplayer_actor = mplayer_actor
         self._player = player
         self._refresh_interval = args.refresh_interval
+        self.queue = queue.SimpleQueue()
         self.running = True
         pass
 
     def run(self):
+        now = time.time()
         while self.running:
+            try:
+                # Process at least one action before timeout, but no more. (Is this the best way?)
+                processed = False
+                while now + self._refresh_interval > time.time() or not processed:
+                    task = self.queue.get(block = True, timeout = max(0, now + self._refresh_interval - time.time()))
+                    processed = True
+                    if task[0] == "play":
+                        self._player.loadfile(task[1])
+                    elif task[0] == "toggle_mute":
+                        self._player.mute = not self._player.mute
+                    elif task[0] == "adjust_volume":
+                        self._player.volume = min(100, max(0, self._player.volume + task[1]))
+                    pass
+            except queue.Empty:
+                pass
             now = time.time()
             self._mplayer_actor.tell(
                 [ "update",
@@ -28,7 +46,6 @@ class MplayerPollingThread(threading.Thread):
                   self._player.percent_pos,
                   self._player.volume
                 ])
-            time.sleep(max(0, now + self._refresh_interval - time.time()))
             pass
         pass
 
@@ -36,7 +53,7 @@ class MplayerPollingThread(threading.Thread):
 
 class MplayerActor(pykka.ThreadingActor):
 
-    def __init__(self, args, player):
+    def __init__(self, args):
         super(MplayerActor, self).__init__()
         self._debug = args.debug
         self._refresh_interval = args.refresh_interval
@@ -44,11 +61,13 @@ class MplayerActor(pykka.ThreadingActor):
         self._cache_length = None
         self._cache_volume = None
         self._cache_percent = None
-        self._player = player
-
+        self._thread = None
+        
     def on_receive(self, msg):
         ret = None
 
+        if msg[0] == "set_thread":
+            self._thread = msg[1]
         if msg[0] == "update":
             self._cache_timepos = msg[1]
             self._cache_length = msg[2]
@@ -59,14 +78,13 @@ class MplayerActor(pykka.ThreadingActor):
             self._cache_length = None
             self._cache_volume = None
             self._cache_percent = None
-            self._player.loadfile(msg[1])
+            self._thread.queue.put(msg)
         elif msg[0] == "get_status":
             ret = (self._cache_timepos, self._cache_length, self._cache_volume, self._cache_percent)
         elif msg[0] == "toggle_mute":
-            self._player.mute = not self._player.mute
+            self._thread.queue.put(msg)
         elif msg[0] == "adjust_volume":
-            self._cache_volume = min(100, max(0, self._player.volume + msg[1]))
-            self._player.volume = self._cache_volume
+            self._thread.queue.put(msg) 
         else:
             pass
 
@@ -98,8 +116,9 @@ class Player:
             self._player = mplayer.Player()
         else:
             self._player = mplayer.Player(stderr = open("/dev/null", "w"))
-        self._player_actor = MplayerActor.start(args, self._player)
+        self._player_actor = MplayerActor.start(args)
         self._helper_thread = MplayerPollingThread(args, self._player_actor, self._player)
+        self._player_actor.ask([ "set_thread", self._helper_thread ]) 
         self._helper_thread.start()
         self._title_widget = urwid.Text("", align = "center")
         self._progress_widget = urwid.Text("", align = "center")
