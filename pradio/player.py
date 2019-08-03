@@ -120,7 +120,7 @@ class Player:
         if args.debug:
             self._player = mplayer.Player()
         else:
-            self._player = mplayer.Player(stderr = open("/dev/null", "w"))
+            self._player = mplayer.Player(stderr = subprocess.DEVNULL)
         self._actor = MplayerActor.start(args)
         self._helper_thread = MplayerPollingThread(args, self._actor, self._player)
         self._actor.ask([ "set_thread", self._helper_thread ])
