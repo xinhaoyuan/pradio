@@ -76,6 +76,7 @@ class VLCPollingThread(threading.Thread):
         pass
 
     def run(self):
+        import vlc
         now = time.time()
         while self.running:
             try:
@@ -102,12 +103,13 @@ class VLCPollingThread(threading.Thread):
             if not self.running:
                 break
             now = time.time()
-            time_pos = self._player.get_time()
+            state = self._player.get_state()
+            has_song = state == vlc.State.Opening or state == vlc.State.Buffering or state == vlc.State.Playing or state == vlc.State.Paused
             self._actor.tell(
                 [ "update",
-                  None if time_pos < 0 else time_pos / 1000.0,
-                  None if time_pos < 0 else self._player.get_length() / 1000.0,
-                  None if time_pos < 0 else self._player.get_position() * 100,
+                  self._player.get_time() / 1000.0 if has_song else None,
+                  self._player.get_length() / 1000.0 if has_song else None,
+                  self._player.get_position() * 100 if has_song else None,
                   self._player.audio_get_volume()
                 ])
             pass
@@ -167,9 +169,11 @@ def channel_button(c, player):
     return urwid.AttrMap(button, None, focus_map='reversed')
 
 def channel_menu(channels, player):
-    body = [ urwid.Text("Choose channel:"), urwid.Divider() ]
+    body = [ ]
     body.extend([ channel_button(c, player) for c in channels ])
-    return urwid.ListBox(urwid.SimpleFocusListWalker(body))
+    return urwid.Frame(header = urwid.Text("Choose channel:"),
+                       body = urwid.ListBox(urwid.SimpleFocusListWalker(body)),
+                       focus_part = "body")
 
 class Player:
 
