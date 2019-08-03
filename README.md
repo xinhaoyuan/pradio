@@ -8,6 +8,12 @@ Hopefully there will be plugin in main-stream players using the protocol.
 
 Author: Xinhao Yuan <xinhaoyuan@gmail.com>
 
+## Dependency
+
+`urwid`, `pykka`, `python-vlc`, or `mplayer.py` if you use `--use-mplayer` option.
+
+Usually vlc is preferred over mplayer.
+
 ## Protocol
 
 Each command and reply is a JSON object with `type` field.

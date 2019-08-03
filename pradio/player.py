@@ -1,6 +1,5 @@
 import subprocess
 import json
-import mplayer
 import time
 import urwid
 import pykka
@@ -12,10 +11,15 @@ import logging
 # Use separate thread to poll status to avoid delays
 class MplayerPollingThread(threading.Thread):
 
-    def __init__(self, args, mplayer_actor, player):
+    def __init__(self, args, actor):
         super(MplayerPollingThread, self).__init__()
-        self._mplayer_actor = mplayer_actor
-        self._player = player
+        self._actor = actor
+        import mplayer
+        if args.debug:
+            self._player = mplayer.Player()
+        else:
+            self._player = mplayer.Player(stderr = subprocess.DEVNULL)
+            pass
         self._refresh_interval = args.refresh_interval
         self.queue = queue.SimpleQueue()
         self.running = True
@@ -30,7 +34,10 @@ class MplayerPollingThread(threading.Thread):
                 while now + self._refresh_interval > time.time() or not processed:
                     task = self.queue.get(block = True, timeout = max(0, now + self._refresh_interval - time.time()))
                     processed = True
-                    if task[0] == "play":
+                    if task[0] == "exit":
+                        self.running = False
+                        break
+                    elif task[0] == "play":
                         self._player.loadfile(task[1])
                     elif task[0] == "toggle_mute":
                         self._player.mute = not self._player.mute
@@ -41,8 +48,10 @@ class MplayerPollingThread(threading.Thread):
                     pass
             except queue.Empty:
                 pass
+            if not self.running:
+                break
             now = time.time()
-            self._mplayer_actor.tell(
+            self._actor.tell(
                 [ "update",
                   self._player.time_pos,
                   self._player.length,
@@ -54,10 +63,62 @@ class MplayerPollingThread(threading.Thread):
 
     pass
 
-class MplayerActor(pykka.ThreadingActor):
+class VLCPollingThread(threading.Thread):
+
+    def __init__(self, args, actor):
+        super(VLCPollingThread, self).__init__()
+        import vlc
+        self._actor = actor
+        self._player = vlc.MediaPlayer()
+        self._refresh_interval = args.refresh_interval
+        self.queue = queue.SimpleQueue()
+        self.running = True
+        pass
+
+    def run(self):
+        now = time.time()
+        while self.running:
+            try:
+                # Process at least one action before timeout, but no more. (Is this the best way?)
+                processed = False
+                while now + self._refresh_interval > time.time() or not processed:
+                    task = self.queue.get(block = True, timeout = max(0, now + self._refresh_interval - time.time()))
+                    processed = True
+                    if task[0] == "exit":
+                        self.running = False
+                        break
+                    elif task[0] == "play":
+                        self._player.set_mrl(task[1])
+                        self._player.play()
+                    elif task[0] == "toggle_mute":
+                        self._player.audio_set_mute(not self._player.audio_get_mute())
+                    elif task[0] == "adjust_volume":
+                        self._player.audio_set_volume(min(100, max(0, self._player.audio_get_volume() + task[1])))
+                    elif task[0] == "pause":
+                        self._player.pause()
+                    pass
+            except queue.Empty:
+                pass
+            if not self.running:
+                break
+            now = time.time()
+            time_pos = self._player.get_time()
+            self._actor.tell(
+                [ "update",
+                  None if time_pos < 0 else time_pos / 1000.0,
+                  None if time_pos < 0 else self._player.get_length() / 1000.0,
+                  None if time_pos < 0 else self._player.get_position() * 100,
+                  self._player.audio_get_volume()
+                ])
+            pass
+        pass
+    pass
+
+
+class PlayerActor(pykka.ThreadingActor):
 
     def __init__(self, args):
-        super(MplayerActor, self).__init__()
+        super(PlayerActor, self).__init__()
         self._debug = args.debug
         self._refresh_interval = args.refresh_interval
         self._cache_timepos = None
@@ -69,14 +130,17 @@ class MplayerActor(pykka.ThreadingActor):
     def on_receive(self, msg):
         ret = None
 
-        if msg[0] == "set_thread":
+        if msg[0] == "exit":
+            self._thread.queue.put(msg)
+            self._thread.join()
+        elif msg[0] == "set_thread":
             self._thread = msg[1]
-        if msg[0] == "update":
+        elif msg[0] == "update":
             self._cache_timepos = msg[1]
             self._cache_length = msg[2]
             self._cache_percent = msg[3]
             self._cache_volume = msg[4]
-        if msg[0] == "play":
+        elif msg[0] == "play":
             self._cache_timepos = None
             self._cache_length = None
             self._cache_volume = None
@@ -117,12 +181,11 @@ class Player:
                                 stdin = subprocess.PIPE,
                                 stdout = subprocess.PIPE)
         self._debug = args.debug
-        if args.debug:
-            self._player = mplayer.Player()
+        self._actor = PlayerActor.start(args)
+        if args.use_mplayer:
+            self._helper_thread = MplayerPollingThread(args, self._actor)
         else:
-            self._player = mplayer.Player(stderr = subprocess.DEVNULL)
-        self._actor = MplayerActor.start(args)
-        self._helper_thread = MplayerPollingThread(args, self._actor, self._player)
+            self._helper_thread = VLCPollingThread(args, self._actor)
         self._actor.ask([ "set_thread", self._helper_thread ])
         self._helper_thread.start()
         self._title_widget = urwid.Text("", align = "center")
@@ -141,6 +204,7 @@ class Player:
             body = self._main_placeholder,
             focus_part = 'header')
         self._current_song_title = None
+        self._current_url = None
         self._last_stopped_time = None
         self._loop = None
         self._channel_id = None
@@ -192,6 +256,8 @@ class Player:
             data = resp["data"]
             url = data["url"]
 
+            logging.info("Playing {}".format(url))
+            self._current_url = url
             self._current_song_title = self._song_format.format(
                 title = data["title"] if "title" in data else "?",
                 album = data["album"] if "album" in data else "?",
@@ -328,11 +394,11 @@ class Player:
         percent = data[3]
         if pos is not None:
             self._last_stopped_time = None
-            self._title_widget.set_text(self._current_song_title if self._current_song_title is not None else self._player.filename)
+            self._title_widget.set_text(self._current_song_title if self._current_song_title is not None else self._current_url)
             self._progress_widget.set_text("{pos}/{length} ({percent}%)".format(
                 pos = "-" if pos is None else ("%.02f" % pos),
                 length = "-" if length is None else ("%.02f" % length),
-                percent = "-" if percent is None else percent
+                percent = "-" if percent is None else ("%.02f" % percent)
             ))
             self._volume_widget.set_text("Volume: {}%".format(vol))
             return True
@@ -370,7 +436,6 @@ class Player:
         except Exception as e:
             logging.exception("Exception in the main loop")
             pass
-        self._helper_thread.running = False
-        self._helper_thread.join()
+        self._actor.ask([ "exit" ])
         self._actor.stop()
         self._proc.kill()
